@@ -1,0 +1,160 @@
+<document type="freeswitch/xml">
+  <section name="configuration" description="Various Configuration">
+    <configuration name="acl.conf" description="Network Lists">
+      <network-lists>
+        <list name="domains" default="deny"></list>
+      </network-lists>
+    </configuration>
+    <configuration name="console.conf" description="Console Logger">
+      <mappings>
+        <map name="all" value="console,debug,info,notice,warning,err,crit,alert"></map>
+      </mappings>
+      <settings>
+        <param name="colorize" value="true"></param>
+        <param name="loglevel" value=""></param>
+      </settings>
+    </configuration>
+    <configuration name="event_socket.conf" description="Socket Client">
+      <settings>
+        <param name="nat-map" value="false"></param>
+        <param name="listen-ip" value="localhost"></param>
+        <param name="listen-port" value="8021"></param>
+        <param name="password" value="ClueCon"></param>
+      </settings>
+    </configuration>
+    <configuration name="hash.conf" description="Hash Configuration">
+      <remotes></remotes>
+    </configuration>
+    <configuration name="httapi.conf" description="HT-TAPI Hypertext Telephony API">
+      <settings>
+        <param name="debug" value="true"></param>
+        <param name="file-not-found-expires" value="300"></param>
+        <param name="file-cache-ttl" value="300"></param>
+      </settings>
+      <profiles>
+        <profile name="default">
+          <conference>
+            <param name="default-profile" value="default"></param>
+          </conference>
+          <dial>
+            <param name="context" value="default"></param>
+            <param name="dialplan" value="XML"></param>
+          </dial>
+          <permissions>
+            <permission name="set-params" value="true"></permission>
+            <permission name="set-vars" value="false"></permission>
+            <permission name="get-vars" value="false"></permission>
+            <permission name="extended-data" value="false"></permission>
+            <permission name="execute-apps" value="true">
+              <application-list default="deny">
+                <application name="info"></application>
+                <application name="hangup"></application>
+              </application-list>
+            </permission>
+            <permission name="expand-vars-in-tag-body" value="false"></permission>
+            <permission name="dial" value="true"></permission>
+            <permission name="dial-set-context" value="false"></permission>
+            <permission name="dial-set-dialplan" value="false"></permission>
+            <permission name="dial-set-cid-name" value="false"></permission>
+            <permission name="dial-set-cid-number" value="false"></permission>
+            <permission name="dial-full-originate" value="false"></permission>
+            <permission name="conference" value="true"></permission>
+            <permission name="conference-set-profile" value="false"></permission>
+          </permissions>
+          <params>
+            <param name="gateway-url" value="http://www.freeswitch.org/api/index.cgi"></param>
+          </params>
+        </profile>
+      </profiles>
+    </configuration>
+    <configuration name="modules.conf" description="Modules">
+      <modules>
+        <load module="mod_console"></load>
+        <load module="mod_event_socket"></load>
+        <load module="mod_commands"></load>
+        <load module="mod_dptools"></load>
+        <load module="mod_expr"></load>
+        <load module="mod_hash"></load>
+        <load module="mod_httapi"></load>
+        <load module="mod_dialplan_xml"></load>
+        <load module="mod_sndfile"></load>
+        <load module="mod_native_file"></load>
+        <load module="mod_tone_stream"></load>
+      </modules>
+    </configuration>
+    <configuration name="switch.conf" description="Core Configuration">
+      <cli-keybindings>
+        <key name="1" value="help"></key>
+        <key name="2" value="status"></key>
+        <key name="3" value="show channels"></key>
+        <key name="4" value="show calls"></key>
+        <key name="5" value="sofia status"></key>
+        <key name="6" value="reloadxml"></key>
+        <key name="7" value="console loglevel 0"></key>
+        <key name="8" value="console loglevel 7"></key>
+        <key name="9" value="sofia status profile internal"></key>
+        <key name="10" value="sofia profile internal siptrace on"></key>
+        <key name="11" value="sofia profile internal siptrace off"></key>
+        <key name="12" value="version"></key>
+      </cli-keybindings>
+      <default-ptimes></default-ptimes>
+      <settings>
+        <param name="colorize-console" value="true"></param>
+        <param name="dialplan-timestamps" value="false"></param>
+        <param name="max-db-handles" value="50"></param>
+        <param name="db-handle-timeout" value="10"></param>
+        <param name="max-sessions" value="1000"></param>
+        <param name="sessions-per-second" value="30"></param>
+        <param name="loglevel" value="debug"></param>
+        <param name="mailer-app" value="sendmail"></param>
+        <param name="mailer-app-args" value="-t"></param>
+        <param name="dump-cores" value="yes"></param>
+        <param name="rtp-enable-zrtp" value="false"></param>
+      </settings>
+    </configuration>
+    <configuration name="nats.conf" description="mod_nats">
+      <publishers>
+        <profile name="default">
+          <connections>
+            <connection name="primary">
+              <param name="url" value="nats://localhost:4222" />
+            </connection>
+          </connections>
+          <params>
+            <param name="subject" value="mod_nats_test" />
+            <param name="circuit_breaker_ms" value="10000" />
+            <param name="reconnect_interval_ms" value="1000" />
+            <param name="send_queue_size" value="5000" />
+            <param name="event_filter" value="SWITCH_EVENT_ALL" />
+          </params>
+        </profile>
+        <profile name="heartbeat">
+          <connections>
+            <connection name="new">
+              <param name="url" value="nats://localhost:4222" />
+            </connection>
+          </connections>
+          <params>
+            <param name="subject" value="mod_nats_test" />
+            <param name="circuit_breaker_ms" value="10000" />
+            <param name="reconnect_interval_ms" value="1000" />
+            <param name="send_queue_size" value="5000" />
+            <param name="event_filter" value="HEARTBEAT" />
+          </params>
+        </profile>
+      </publishers>
+    </configuration>
+  </section>
+  <section name="dialplan" description="Regex/XML Dialplan">
+    <context name="internal">
+      <extension name="default">
+        <condition>
+          <action application="park"></action>
+        </condition>
+      </extension>
+    </context>
+  </section>
+  <section name="chatplan" description="Regex/XML Chatplan"></section>
+  <section name="directory" description="User Directory"></section>
+  <section name="languages" description="Language Management"></section>
+</document>

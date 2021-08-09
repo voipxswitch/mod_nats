@@ -1,0 +1,18 @@
+<configuration name="nats.conf" description="mod_nats">
+    <publishers>
+        <profile name="default">
+            <connections>
+                <connection name="primary">
+                    <param name="url" value="nats://localhost:4222" />
+                </connection>
+            </connections>
+            <params>
+                <param name="subject" value="MyEvents" />
+                <param name="circuit_breaker_ms" value="10000" />
+                <param name="reconnect_interval_ms" value="1000" />
+                <param name="send_queue_size" value="5000" />
+                <param name="event_filter" value="SWITCH_EVENT_CHANNEL_CREATE,SWITCH_EVENT_CHANNEL_DESTROY,SWITCH_EVENT_CHANNEL_CALLSTATE,SWITCH_EVENT_CHANNEL_STATE,SWITCH_EVENT_CHANNEL_ANSWER,SWITCH_EVENT_CHANNEL_HANGUP_COMPLETE,SWITCH_EVENT_CHANNEL_HANGUP,SWITCH_EVENT_CHANNEL_HOLD,SWITCH_EVENT_CHANNEL_UNHOLD,SWITCH_EVENT_CHANNEL_BRIDGE,SWITCH_EVENT_CHANNEL_UNBRIDGE,SWITCH_EVENT_CHANNEL_UUID,SWITCH_EVENT_DTMF,BACKGROUND_JOB,HEARTBEAT" />
+            </params>
+        </profile>
+    </publishers>
+</configuration>
