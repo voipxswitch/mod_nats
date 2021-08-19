@@ -54,7 +54,7 @@ void mod_nats_publisher_event_handler(switch_event_t *evt)
 	/* If the mod is disabled ignore the event */
 	if (!profile->running)
 	{
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Profile[%s] not running\n", profile->name);
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "profile [%s] not running\n", profile->name);
 		return;
 	}
 
@@ -62,12 +62,12 @@ void mod_nats_publisher_event_handler(switch_event_t *evt)
 	reset_time = profile->circuit_breaker_reset_time;
 	if (now < reset_time)
 	{
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Profile[%s] circuit breaker hit[%d] (%d)\n", profile->name, (int)now, (int)reset_time);
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "profile [%s] circuit breaker hit [%d] (%d)\n", profile->name, (int)now, (int)reset_time);
 		return;
 	}
 
 	switch_malloc(message, sizeof(mod_nats_message_t));
-
+	message->evname = strdup(switch_event_name(evt->event_id));
 	switch_event_serialize_json(evt, &message->pjson);
 
 	/* Queue the message to be sent by the worker thread, errors are reported only once per circuit breaker interval */
@@ -106,6 +106,12 @@ switch_status_t mod_nats_publisher_destroy(mod_nats_publisher_profile_t **prof)
 	{
 		switch_thread_join(&status, profile->publisher_thread);
 	}
+	if (profile->js)
+	{
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "destroyed NATS stream in profile [%s]\n", profile->name);
+		jsCtx_Destroy(profile->js);
+	}
+
 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "closing NATS connection in profile [%s]\n", profile->name);
 	for (conn = profile->conn_root; conn; conn = conn_next)
 	{
@@ -134,6 +140,9 @@ switch_status_t mod_nats_publisher_create(char *name, switch_xml_t cfg)
 	switch_xml_t params, param, connections, connection;
 	switch_threadattr_t *thd_attr = NULL;
 	char *subject = NULL;
+	char *jetstream_name = NULL;
+	switch_bool_t jetstream_enabled = SWITCH_FALSE;
+	char *jetstream_subject = NULL;
 	switch_memory_pool_t *pool;
 
 	if (switch_core_new_memory_pool(&pool) != SWITCH_STATUS_SUCCESS)
@@ -201,6 +210,14 @@ switch_status_t mod_nats_publisher_create(char *name, switch_xml_t cfg)
 			{
 				subject = switch_core_strdup(profile->pool, val);
 			}
+			else if (!strncmp(var, "jetstream_enabled", 17))
+			{
+				jetstream_enabled = switch_true(val);
+			}
+			else if (!strncmp(var, "jetstream_name", 14))
+			{
+				jetstream_name = switch_core_strdup(profile->pool, val);
+			}
 			else if (!strncmp(var, "event_filter", 12))
 			{
 				char *tmp = switch_core_strdup(profile->pool, val);
@@ -220,8 +237,35 @@ switch_status_t mod_nats_publisher_create(char *name, switch_xml_t cfg)
 		} /* params for loop */
 	}
 
-	/* Handle defaults of string types */
-	profile->subject = subject ? subject : switch_core_strdup(profile->pool, "subject");
+	profile->subject = subject ? subject : switch_core_strdup(profile->pool, profile->name);
+	profile->jetstream_name = jetstream_name ? jetstream_name : switch_core_strdup(profile->pool, profile->name);
+	profile->jetstream_enabled = jetstream_enabled;
+	if (jetstream_enabled == SWITCH_TRUE)
+	{
+		jetstream_subject = strdup(profile->subject);
+		if (jetstream_subject != NULL)
+		{
+			size_t size = strlen(jetstream_subject);
+			if (size >= 2 &&
+				jetstream_subject[size - 2] == '.' &&
+				jetstream_subject[size - 1] == '*')
+			{
+				char jetstream_subject_trimmed[1024];
+				switch_snprintf(jetstream_subject_trimmed, sizeof(jetstream_subject) - 2, "%s", jetstream_subject);
+				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "profile [%s] trimmed subject [%s]\n", profile->name, jetstream_subject_trimmed);
+				profile->jetstream_subject = switch_core_strdup(profile->pool, jetstream_subject_trimmed);
+			}
+			else
+			{
+				profile->jetstream_subject = switch_core_strdup(profile->pool, jetstream_subject);
+			}
+		}
+		else
+		{
+			profile->jetstream_subject = switch_core_strdup(profile->pool, jetstream_subject);
+		}
+		switch_safe_free(jetstream_subject);
+	}
 
 	if ((connections = switch_xml_child(cfg, "connections")) != NULL)
 	{
@@ -232,7 +276,7 @@ switch_status_t mod_nats_publisher_create(char *name, switch_xml_t cfg)
 				if (mod_nats_connection_create(&(profile->conn_root), connection, profile->pool) != SWITCH_STATUS_SUCCESS)
 				{
 					/* Handle connection create failure */
-					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Profile[%s] failed to create connection\n", profile->name);
+					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "profile [%s] failed to create connection\n", profile->name);
 					continue;
 				}
 				profile->conn_active = profile->conn_root;
@@ -326,10 +370,36 @@ switch_status_t mod_nats_publisher_send(mod_nats_publisher_profile_t *profile, m
 	if (!profile->conn_active)
 	{
 		/* No connection, so we can not send the message. */
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "Profile[%s] not active\n", profile->name);
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "profile [%s] not active\n", profile->name);
 		return SWITCH_STATUS_NOT_INITALIZED;
 	}
-	s = natsConnection_PublishString(profile->conn_active->connection, profile->subject, msg->pjson);
+
+	if (profile->jetstream_connected == SWITCH_TRUE)
+	{
+		char subj[1024];
+		switch_snprintf(subj, sizeof(subj), "%s.%s", profile->jetstream_subject, msg->evname);
+		s = natsMsg_Create(&message, subj, NULL, msg->pjson, strlen(msg->pjson));
+		if (s != NATS_OK)
+		{
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "could not create message using subject [%s] in profile [%s] not active\n", profile->jetstream_subject, profile->name);
+			return SWITCH_STATUS_SOCKERR;
+		}
+		s = js_PublishMsgAsync(profile->js, &message, NULL);
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "sending event [%s] in subject [%s]\n", msg->evname, subj);
+		natsMsg_Destroy(message);
+	}
+	else
+	{
+		s = natsMsg_Create(&message, profile->subject, NULL, msg->pjson, strlen(msg->pjson));
+		if (s != NATS_OK)
+		{
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "could not create message using subject [%s] in profile [%s] not active\n", profile->subject, profile->name);
+			return SWITCH_STATUS_SOCKERR;
+		}
+		s = natsConnection_PublishMsg(profile->conn_active->connection, message);
+		natsMsg_Destroy(message);
+	}
+
 	if (s != NATS_OK)
 	{
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "Profile[%s] failed to send event on connection[%s] with subject [%s] payload [%s] %s\n",
@@ -357,6 +427,91 @@ void *SWITCH_THREAD_FUNC mod_nats_publisher_thread(switch_thread_t *thread, void
 			if (status == SWITCH_STATUS_SUCCESS)
 			{
 				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "connected to profile [%s]\n", profile->name);
+				if (profile->jetstream_enabled == SWITCH_TRUE)
+				{
+					profile->jetstream_connected = SWITCH_FALSE;
+					profile->jerr = 0;
+					jsOptions jsOpts;
+					natsStatus s;
+					s = jsOptions_Init(&jsOpts);
+					if (s == NATS_OK)
+					{
+						char subj[1024];
+						switch_snprintf(subj, sizeof(subj), "%s.*", profile->jetstream_subject);
+						s = natsConnection_JetStream(&profile->js, profile->conn_active->connection, &jsOpts);
+						if (s == NATS_OK)
+						{
+							jsStreamInfo *si = NULL;
+							s = js_GetStreamInfo(&si, profile->js, profile->jetstream_name, NULL, &profile->jerr);
+							if (s == NATS_OK)
+							{
+								switch_bool_t subject_exists = SWITCH_FALSE;
+								int i = 0;
+								jsStreamConfig cfg = *si->Config;
+								for (i; i < cfg.SubjectsLen; i++)
+								{
+									if (!strncmp(cfg.Subjects[i], subj, strlen(subj)))
+									{
+										subject_exists = SWITCH_TRUE;
+										switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "subject found [%s]\n",
+														  cfg.Subjects[i]);
+									}
+								}
+								if (subject_exists == SWITCH_FALSE)
+								{
+									cfg.Subjects[i] = subj;
+									cfg.SubjectsLen = i + 1;
+									switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "added subject [%s] to stream [%s]\n",
+													  subj, profile->jetstream_name);
+								}
+								s = js_UpdateStream(&si, profile->js, &cfg, NULL, &profile->jerr);
+								if (s != NATS_OK)
+								{
+									switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "could not update NATS stream [%s] on profile [%s] %s\n",
+													  profile->jetstream_name, profile->name, natsStatus_GetText(s));
+								}
+								else
+								{
+									profile->jetstream_connected = SWITCH_TRUE;
+								}
+							}
+							else if (s == NATS_NOT_FOUND)
+							{
+								jsStreamConfig cfg;
+								jsStreamConfig_Init(&cfg);
+								cfg.Name = profile->jetstream_name;
+								cfg.Subjects = (const char *[1]){subj};
+								cfg.SubjectsLen = 1;
+								cfg.Storage = js_MemoryStorage;
+								cfg.Retention = js_WorkQueuePolicy;
+								switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "profile [%s] NATS stream [%s] not found\n",
+												  profile->name, profile->jetstream_name);
+								s = js_AddStream(&si, profile->js, &cfg, NULL, &profile->jerr);
+								if (s != NATS_OK)
+								{
+									switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "could not add NATS stream [%s] on profile [%s] with subject [%s] %s\n",
+													  profile->jetstream_name, profile->name, subj, natsStatus_GetText(s));
+								}
+								else
+								{
+									profile->jetstream_connected = SWITCH_TRUE;
+								}
+							}
+							else
+							{
+								switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "could not get NATS stream [%s] info in profile [%s] %s\n", profile->jetstream_name, profile->name, natsStatus_GetText(s));
+							}
+							if (si)
+							{
+								jsStreamInfo_Destroy(si);
+							}
+						}
+						if (profile->jetstream_connected == SWITCH_TRUE)
+						{
+							switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "stream [%s] connected on profile [%s]\n", profile->jetstream_name, profile->name);
+						}
+					}
+				}
 				continue;
 			}
 			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "profile [%s] failed to connect with code(%d), sleeping for %dms\n",

@@ -121,7 +121,9 @@
             </connection>
           </connections>
           <params>
-            <param name="subject" value="mod_nats_test" />
+            <param name="subject" value="EVENTS" />
+            <param name="jetstream_name" value="EVENTS" />
+            <param name="jetstream_enabled" value="true" />
             <param name="circuit_breaker_ms" value="10000" />
             <param name="reconnect_interval_ms" value="1000" />
             <param name="send_queue_size" value="5000" />
@@ -135,7 +137,7 @@
             </connection>
           </connections>
           <params>
-            <param name="subject" value="mod_nats_test" />
+            <param name="subject" value="events.heartbeat" />
             <param name="circuit_breaker_ms" value="10000" />
             <param name="reconnect_interval_ms" value="1000" />
             <param name="send_queue_size" value="5000" />

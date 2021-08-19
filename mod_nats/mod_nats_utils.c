@@ -91,6 +91,7 @@ void mod_nats_util_msg_destroy(mod_nats_message_t **msg)
 {
 	if (!msg || !*msg)
 		return;
+	switch_safe_free((*msg)->evname);
 	switch_safe_free((*msg)->pjson);
 	switch_safe_free(*msg);
 }

@@ -48,6 +48,7 @@
 
 typedef struct
 {
+  char *evname;
   char *pjson;
 } mod_nats_message_t;
 
@@ -63,6 +64,12 @@ typedef struct
 {
   char *name;
   char *subject;
+  switch_bool_t jetstream_connected;
+  switch_bool_t jetstream_enabled;
+  char *jetstream_name;
+  char *jetstream_subject;
+  jsCtx *js;
+  jsErrCode jerr;
   /* Array to store the possible event subscriptions */
   int event_subscriptions;
   switch_event_node_t *event_nodes[SWITCH_EVENT_ALL];
